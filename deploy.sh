@@ -3,51 +3,43 @@
 # Detener ejecución ante errores
 set -e
 
-# Apagar NGINX
+# Corregir nombre de variables y comandos
 echo "Apagando NGINX..."
 sudo systemctl stop nginx
 
-# Apagar NGROK
 echo "Apagando NGROK..."
-pkill ngrok || true  # Ignorar error si no está corriendo
+pkill -f "ngrok http 80" || true
 
-# Obtener últimos cambios del repositorio
-echo "Clonando el repositorio..."
+echo "Actualizando repositorio..."
 git pull origin main
 
-# Instalar dependencias si es necesario (ejemplo)
-# echo "Instalando dependencias..."
-# npm install
-
-# Construir aplicación si es necesario (ejemplo)
-# echo "Construyendo aplicación..."
-# npm run build
-
-# Encender NGINX
-echo "Encendiendo NGINX..."
+echo "Reiniciando NGINX..."
 sudo systemctl start nginx
 
-# Generar URL pública con NGROK
-echo "Generando URL pública de NGROK..."
+echo "Iniciando NGROK..."
 nohup ngrok http 80 > /dev/null 2>&1 &
 
-# Esperar hasta que Ngrok esté listo (máximo 20 segundos)
+# Espera mejorada compatible con sh
 max_attempts=20
-for ((i=1; i<=$max_attempts; i++)); do
-  ngrok_url=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' || true)
-  if [[ $ngrok_url == http* ]]; then
-    break
-  fi
-  sleep 1
+i=1
+while [ $i -le $max_attempts ]; do
+    ngrok_url=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' || true)
+    if [[ "$ngrok_url" == http* ]]; then
+        break
+    fi
+    sleep 1
+    i=$((i + 1))
 done
 
-if [[ ! $ngrok_url == http* ]]; then
-  echo "Error: No se pudo obtener la URL de Ngrok"
-  exit 1
+if [[ ! "$ngrok_url" == http* ]]; then
+    echo "Error: Ngrok no respondió después de $max_attempts intentos"
+    exit 1
 fi
 
-echo "Tu página web está accesible en: $ngrok_url"
+echo "Tu aplicación está disponible en: $ngrok_url"
 
-# Ejecutar script de despliegue adicional
-echo "Ejecutando el script de despliegue..."
-sh deploy.sh
+# Ejecutar script adicional solo si existe
+if [ -f "deploy.sh" ]; then
+    echo "Ejecutando pasos adicionales..."
+    bash deploy.sh  # Usar bash explícitamente
+fi
