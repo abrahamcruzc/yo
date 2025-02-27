@@ -1,7 +1,13 @@
 #!/bin/bash
-set -e  # Detener el script si hay un error
+set -e
 
-# 1. Configuración de Nginx
+# 1. Verificar que index.html existe
+if [ ! -f "/home/ubuntu/yo/index.html" ]; then
+    echo "Error: index.html no encontrado en /home/ubuntu/yo."
+    exit 1
+fi
+
+# 2. Configurar Nginx
 echo "Configurando Nginx..."
 sudo bash -c 'cat > /etc/nginx/sites-available/default <<EOF
 server {
@@ -12,57 +18,38 @@ server {
     index index.html;
 
     location / {
-        try_files \$uri \$uri/ /index.html;
+        try_files \$uri \$uri/ =404;
     }
 
-    location ~ /\. {
-        deny all;
-    }
-
-    error_page 404 /404.html;
-    location = /404.html {
-        internal;
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
     }
 }
 EOF'
 
-# 2. Reiniciar Nginx
+# 3. Ajustar permisos
+echo "Ajustando permisos..."
+sudo chmod -R 755 /home/ubuntu/yo
+sudo chown -R www-data:www-data /home/ubuntu/yo
+
+# 4. Reiniciar Nginx
 echo "Reiniciando Nginx..."
 sudo systemctl restart nginx
 
-# 3. Detener Ngrok si ya está corriendo
-echo "Deteniendo Ngrok si está en ejecución..."
-pkill -f "ngrok http 80" || true
-
-# 4. Iniciar Ngrok en segundo plano
+# 5. Iniciar Ngrok
 echo "Iniciando Ngrok..."
+pkill -f "ngrok http 80" || true
 nohup ngrok http 80 > /dev/null 2>&1 &
 
-# 5. Esperar a que Ngrok esté listo
+# 6. Obtener URL de Ngrok
 echo "Esperando a que Ngrok genere la URL..."
-sleep 5  # Espera inicial para que Ngrok se inicie
+sleep 5
+ngrok_url=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
 
-max_attempts=10
-ngrok_url=""
-for i in $(seq 1 $max_attempts); do
-    ngrok_url=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' || true)
-    if [[ "$ngrok_url" == http* ]]; then
-        break
-    fi
-    sleep 2
-done
-
-# 6. Verificar si se obtuvo la URL
 if [[ -z "$ngrok_url" ]]; then
-    echo "Error: No se pudo obtener la URL de Ngrok después de $max_attempts intentos."
+    echo "Error: No se pudo obtener la URL de Ngrok."
     exit 1
 fi
 
-# 7. Mostrar la URL generada
 echo "¡Tu aplicación está disponible en: $ngrok_url"
-
-# 8. Mantener el script en ejecución (opcional)
-echo "Presiona Ctrl+C para detener Ngrok..."
-while true; do
-    sleep 1
-done
