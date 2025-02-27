@@ -1,45 +1,50 @@
 #!/bin/bash
-
-# Detener ejecución ante errores
 set -e
 
-# Corregir nombre de variables y comandos
-echo "Apagando NGINX..."
-sudo systemctl stop nginx
+# 1. Corregir nombres de comandos y evitar recursión
+SCRIPT_NAME=$(basename "$0")
 
-echo "Apagando NGROK..."
+# 2. Función para manejar NGINX
+manage_nginx() {
+    echo "Deteniendo NGINX..."
+    sudo systemctl stop nginx || true
+    
+    echo "Reiniciando NGINX..."
+    sudo systemctl start nginx
+    sudo systemctl status nginx --no-pager
+}
+
+# 3. Detener procesos colgados
+echo "Limpiando procesos anteriores..."
 pkill -f "ngrok http 80" || true
+sudo fuser -k 80/tcp || true
 
-echo "Actualizando repositorio..."
+# 4. Actualizar repositorio
+echo "Actualizando código..."
 git pull origin main
 
-echo "Reiniciando NGINX..."
-sudo systemctl start nginx
+# 5. Iniciar servicios
+manage_nginx
 
 echo "Iniciando NGROK..."
 nohup ngrok http 80 > /dev/null 2>&1 &
 
-# Espera mejorada compatible con sh
+# 6. Espera mejorada para Ngrok
 max_attempts=20
-i=1
-while [ $i -le $max_attempts ]; do
+for i in $(seq 1 $max_attempts); do
     ngrok_url=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' || true)
-    if [[ "$ngrok_url" == http* ]]; then
-        break
-    fi
+    [[ "$ngrok_url" == http* ]] && break
     sleep 1
-    i=$((i + 1))
 done
 
-if [[ ! "$ngrok_url" == http* ]]; then
-    echo "Error: Ngrok no respondió después de $max_attempts intentos"
-    exit 1
-fi
+[[ "$ngrok_url" != http* ]] && { echo "Error: Ngrok no respondió"; exit 1; }
 
-echo "Tu aplicación está disponible en: $ngrok_url"
+echo "URL pública: $ngrok_url"
 
-# Ejecutar script adicional solo si existe
-if [ -f "deploy.sh" ]; then
+# 7. Evitar recursión
+if [ "$SCRIPT_NAME" != "deploy.sh" ]; then
     echo "Ejecutando pasos adicionales..."
-    bash deploy.sh  # Usar bash explícitamente
+    bash deploy.sh
+else
+    echo "Despliegue completo. Verificar: $ngrok_url"
 fi
